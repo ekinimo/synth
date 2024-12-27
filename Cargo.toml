@@ -1,0 +1,11 @@
+[package]
+name = "cli_synth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cpal = "0.15.3"
+crossterm = "0.28.1"
+eframe = "0.30.0"
+egui = "0.30.0"
+rand = "0.8.5"
