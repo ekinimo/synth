@@ -13,6 +13,10 @@ enum Waveform {
     Sawtooth,
     Triangle,
     Noise,
+    Additive{
+        num_harmonics:usize,
+        harmonic_weights:[f32;16]
+    },
 }
 
 struct Synth {
@@ -24,6 +28,8 @@ struct Synth {
     decay: f32,
     sustain: f32,
     release: f32,
+    num_harmonics:usize,
+    harmonic_weights:[f32;16],
 }
 
 struct Voice {
@@ -32,6 +38,7 @@ struct Voice {
     envelope: Envelope,
     phase: f32,
     pitch_bend: f32,
+    harmonic_phases: [f32; 16],
 }
 
 struct Envelope {
@@ -101,6 +108,19 @@ impl Voice {
                 }
             },
             Waveform::Noise => rand::random::<f32>() * 2.0 - 1.0,
+            Waveform::Additive { num_harmonics, harmonic_weights } => {
+                let mut sum = 0.0;
+                for h in 0..num_harmonics.min(16) {
+                    let harmonic_freq = bent_frequency * (h + 1) as f32;
+                    if harmonic_freq < sample_rate / 2.0 { // Prevent aliasing
+                        let harmonic_phase_step = harmonic_freq * 2.0 * PI / sample_rate;
+                        self.harmonic_phases[h] = (self.harmonic_phases[h] + harmonic_phase_step) % (2.0 * PI);
+                        sum += harmonic_weights[h] * self.harmonic_phases[h].sin();
+                    }
+                }
+                // Normalize output
+                sum / (num_harmonics as f32).sqrt()
+            }
         };
 
         self.phase = (self.phase + phase_step) % (2.0 * PI);
@@ -119,18 +139,29 @@ impl Synth {
             decay: 0.1,
             sustain: 0.7,
             release: 0.3,
+            harmonic_weights: [1.0, 0.5, 0.33, 0.25, 0.2, 0.17, 0.14, 0.13, 0.11, 0.1, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04],
+            num_harmonics: 8,
         }
     }
 
     fn note_on(&mut self, note: u8) {
         if self.voices.contains_key(&note) && !self.voices[&note].envelope.is_released { return ; }
         let frequency = 440.0 * 2.0f32.powf((note as f32 ) / 12.0);
+        let waveform = match self.waveform {
+            Waveform::Additive { .. } => Waveform::Additive {
+                num_harmonics: self.num_harmonics,
+                harmonic_weights: self.harmonic_weights,
+            },
+            other => other,
+        };
         let mut voice = Voice {
             frequency,
-            waveform: self.waveform,
+            waveform,
             envelope: Envelope::new(self.attack, self.decay, self.sustain, self.release),
             phase: 0.0,
             pitch_bend: self.pitch_bend,
+            harmonic_phases: [0.0; 16],
+
         };
         voice.envelope.start_time = Some(Instant::now());
         self.voices.insert(note, voice);
@@ -207,7 +238,23 @@ impl eframe::App for SynthApp {
                 ui.radio_value(&mut synth.waveform, Waveform::Sawtooth, "Saw");
                 ui.radio_value(&mut synth.waveform, Waveform::Triangle, "Triangle");
                 ui.radio_value(&mut synth.waveform, Waveform::Noise, "Noise");
+                if ui.radio(matches!(synth.waveform, Waveform::Additive {..}), "Additive").clicked() {
+                    synth.waveform = Waveform::Additive {
+                        num_harmonics: synth.num_harmonics,
+                        harmonic_weights: synth.harmonic_weights,
+                    };
+                }
             });
+
+            if matches!(synth.waveform, Waveform::Additive {..}) {
+                ui.add(egui::Slider::new(&mut synth.num_harmonics, 1..=16).text("Number of Harmonics"));
+
+                ui.label("Harmonic Weights:");
+                for i in 0..synth.num_harmonics {
+                    ui.add(egui::Slider::new(&mut synth.harmonic_weights[i], 0.0..=1.0)
+                        .text(format!("Harmonic {}", i + 1)));
+                }
+            }
 
             ui.heading("ADSR Envelope");
             ui.add(egui::Slider::new(&mut synth.attack, 0.01..=1.0).text("Attack"));
