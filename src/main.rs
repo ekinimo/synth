@@ -476,13 +476,13 @@ impl eframe::App for SynthApp {
                 ui.horizontal(|ui| {
                     for col in 0..cols {
                         // Calculate MIDI note
-                        let mut note = col + row * cols;
+                        let note = col + row * cols;
 
                         let response =
                             ui.allocate_response(tile_size, egui::Sense::click_and_drag());
 
                         // Draw tile
-                        let mut painter = ui.painter();
+                        let painter = ui.painter();
                         let rect = response.rect;
                         painter.rect_filled(
                             rect,
