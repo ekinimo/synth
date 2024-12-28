@@ -345,11 +345,20 @@ impl SynthApp {
 
         stream.play().unwrap();
 
-        let map: HashMap<egui::Key, u8> = "zxcvbnm,./asdfghjkl;\'\\qwertyuiop[]`1234567890-="
-            .chars()
-            .map(|x| egui::Key::from_name(&format!("{x}")).unwrap())
+        let keyboard = [
+            "zxcvbnm,./",
+            "asdfghjkl;'\\",
+            "qwertyuiop[]",
+            "`1234567890-=",
+        ];
+        let map: HashMap<egui::Key, u8> = keyboard.into_iter()
             .enumerate()
-            .map(|(i, d)| (d, i as u8))
+            .flat_map(move |(cnt, s)| {
+                s.chars()
+                    .map( move |x| egui::Key::from_name(&format!("{x}")).unwrap())
+                    .enumerate()
+                    .map(move |(i, d)| (d, (i + cnt * 4) as u8))
+            })
             .collect();
         Self {
             synth: synth_clone,
