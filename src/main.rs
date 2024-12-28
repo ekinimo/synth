@@ -489,21 +489,6 @@ impl eframe::App for SynthApp {
                             5.0, // Corner radius
                             egui::Stroke::new(1.0, egui::Color32::BLACK),
                         );
-
-                        /*
-                        let mut note_string = note.to_string();
-                        if ui
-                            .put(rect, egui::TextEdit::singleline(&mut note_string))
-                            .changed()
-                        {
-                            if let Ok(parsed_note) = note_string.parse::<u8>() {
-                                if parsed_note <= 127 {
-                                    note = parsed_note;
-                                }
-                            }
-                        }*/
-
-                        // Handle note-on and note-off
                         if response.drag_started() {
                             synth.note_on(note);
                         }
@@ -538,37 +523,6 @@ impl eframe::App for SynthApp {
                 }
             }
         });
-
-        /*
-                if ctx.input(|i| i.key_pressed(egui::Key::A)) { self.synth.lock().unwrap().note_on(60); }
-                if ctx.input(|i| i.key_pressed(egui::Key::S)) { self.synth.lock().unwrap().note_on(62); }
-                if ctx.input(|i| i.key_pressed(egui::Key::D)) { self.synth.lock().unwrap().note_on(64); }
-                if ctx.input(|i| i.key_pressed(egui::Key::F)) { self.synth.lock().unwrap().note_on(65); }
-                if ctx.input(|i| i.key_pressed(egui::Key::G)) { self.synth.lock().unwrap().note_on(67); }
-                if ctx.input(|i| i.key_pressed(egui::Key::H)) { self.synth.lock().unwrap().note_on(69); }
-                if ctx.input(|i| i.key_pressed(egui::Key::J)) { self.synth.lock().unwrap().note_on(71); }
-                if ctx.input(|i| i.key_pressed(egui::Key::K)) { self.synth.lock().unwrap().note_on(72); }
-                if ctx.input(|i| i.key_pressed(egui::Key::L)) { self.synth.lock().unwrap().note_on(74); }
-                if ctx.input(|i| i.key_pressed(egui::Key::M)) { self.synth.lock().unwrap().note_on(76); }
-                if ctx.input(|i| i.key_pressed(egui::Key::Colon)) { self.synth.lock().unwrap().note_on(75); }
-                if ctx.input(|i| i.key_pressed(egui::Key::Quote)) { self.synth.lock().unwrap().note_on(77); }
-
-
-
-
-                if ctx.input(|i| i.key_released(egui::Key::A)) { self.synth.lock().unwrap().note_off(60); }
-                if ctx.input(|i| i.key_released(egui::Key::S)) { self.synth.lock().unwrap().note_off(62); }
-                if ctx.input(|i| i.key_released(egui::Key::D)) { self.synth.lock().unwrap().note_off(64); }
-                if ctx.input(|i| i.key_released(egui::Key::F)) { self.synth.lock().unwrap().note_off(65); }
-                if ctx.input(|i| i.key_released(egui::Key::G)) { self.synth.lock().unwrap().note_off(67); }
-                if ctx.input(|i| i.key_released(egui::Key::H)) { self.synth.lock().unwrap().note_off(69); }
-                if ctx.input(|i| i.key_released(egui::Key::J)) { self.synth.lock().unwrap().note_off(71); }
-                if ctx.input(|i| i.key_released(egui::Key::K)) { self.synth.lock().unwrap().note_off(72); }
-                if ctx.input(|i| i.key_released(egui::Key::L)) { self.synth.lock().unwrap().note_off(74); }
-                if ctx.input(|i| i.key_released(egui::Key::M)) { self.synth.lock().unwrap().note_off(76); }
-                if ctx.input(|i| i.key_released(egui::Key::Colon)) { self.synth.lock().unwrap().note_off(75); }
-                if ctx.input(|i| i.key_released(egui::Key::Quote)) { self.synth.lock().unwrap().note_off(77); }
-        */
 
         ctx.request_repaint();
     }
