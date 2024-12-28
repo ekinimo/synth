@@ -437,12 +437,10 @@ impl eframe::App for SynthApp {
             });
             ui.heading("Keyboard-to-Note Mapping");
             // Render keyboard rows with drag value for note adjustment
-            let rows = vec![
-                "`1234567890-=".chars().collect::<Vec<_>>(),
+            let rows = ["`1234567890-=".chars().collect::<Vec<_>>(),
                 "qwertyuiop[]\\".chars().collect::<Vec<_>>(),
                 "asdfghjkl;'".chars().collect::<Vec<_>>(),
-                "zxcvbnm,./".chars().collect::<Vec<_>>(),
-            ];
+                "zxcvbnm,./".chars().collect::<Vec<_>>()];
             for row in rows.iter() {
                 ui.horizontal(|ui| {
                     for &key_char in row {
@@ -516,7 +514,7 @@ impl eframe::App for SynthApp {
                 if let egui::Event::Key { key, pressed, .. } = event {
                     //println!("{:?} {:?} {} ", &key, pressed, self.key_map[ &]  );
                     {
-                        if self.key_map.contains_key(&key) {
+                        if self.key_map.contains_key(key) {
                             let freq = self.key_map[key];
                             notes.push((freq, pressed));
                         }
