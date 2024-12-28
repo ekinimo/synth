@@ -113,7 +113,7 @@ impl FrequencyEnvelope {
             if elapsed < self.attack {
                 // Interpolate from start frequency to peak frequency
                 let progress = elapsed / self.attack;
-                let start_mult = self.start_freq / self.start_freq; // Always 1.0
+                let start_mult = 1.0;
                 let peak_mult = self.peak_freq / self.start_freq;
                 start_mult + (peak_mult - start_mult) * progress
             } else if elapsed < self.attack + self.decay {
@@ -206,14 +206,16 @@ impl Voice {
                 harmonic_weights,
             } => {
                 let mut sum = 0.0;
-                for h in 0..num_harmonics.min(16) {
+                //for h in 0..num_harmonics.min(16) 
+                for (h, harmonic_weight) in harmonic_weights.iter().enumerate().take(num_harmonics.min(16))
+                {
                     let harmonic_freq = current_frequency * (h + 1) as f32;
                     if harmonic_freq < sample_rate / 2.0 {
                         // Prevent aliasing
                         let harmonic_phase_step = harmonic_freq * 2.0 * PI / sample_rate;
                         self.harmonic_phases[h] =
                             (self.harmonic_phases[h] + harmonic_phase_step) % (2.0 * PI);
-                        sum += harmonic_weights[h] * self.harmonic_phases[h].sin();
+                        sum += harmonic_weight * self.harmonic_phases[h].sin();
                     }
                 }
                 // Normalize output
