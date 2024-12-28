@@ -1,6 +1,6 @@
 use eframe::egui;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat, Stream, SizedSample};
+use cpal::{SampleFormat, Stream};
 use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -166,7 +166,7 @@ struct SynthApp {
 }
 
 impl SynthApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let host = cpal::default_host();
         let device = host.default_output_device().expect("no output device");
         let config = device.default_output_config().unwrap();
@@ -217,6 +217,92 @@ impl eframe::App for SynthApp {
 
             ui.add(egui::Slider::new(&mut synth.pitch_bend, 0.5..=2.0).text("Pitch Bend"));
 
+           ui.heading("Keyboard-to-Note Mapping");
+            // Render keyboard rows with drag value for note adjustment
+            let rows = vec![
+                "`1234567890-=".chars().collect::<Vec<_>>(),
+                "qwertyuiop[]\\".chars().collect::<Vec<_>>(),
+                "asdfghjkl;'".chars().collect::<Vec<_>>(),
+                "zxcvbnm,./".chars().collect::<Vec<_>>(),
+            ];
+             for row in rows.iter() {
+                ui.horizontal(|ui| {
+                    for &key_char in row {
+                        let key = egui::Key::from_name(&key_char.to_string()).unwrap();
+                        let note = self.key_map.entry(key).or_insert(0); 
+
+                        // Display key and text input for note
+                        ui.vertical(|ui| {
+                            ui.label(key_char.to_string());
+                            let mut note_string = note.to_string();
+                            let text_edit = egui::TextEdit::singleline(&mut note_string).desired_width(45.0);
+                            if ui.add(text_edit).changed() {
+                                if let Ok(parsed_note) = note_string.parse::<u8>() {
+                                    if parsed_note <= 127 {
+                                        *note = parsed_note;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+
+            ui.heading("Rectangular Keyboard");
+            let tile_size = egui::vec2(50.0, 50.0); // Size of each tile
+            let rows :u8 = 5; // Number of rows
+            let cols :u8 = 10; // Number of columns
+
+            for row in 0..rows {
+                ui.horizontal(|ui| {
+                    for col in 0..cols {
+                        // Calculate MIDI note
+                        let mut note = col+row*cols ;
+
+                        let response = ui.allocate_response(tile_size, egui::Sense::click_and_drag());
+
+                        // Draw tile
+                        let mut painter = ui.painter();
+                        let rect = response.rect;
+                        painter.rect_filled(
+                            rect,
+                            5.0, // Corner radius
+                            if response.hovered() || response.clicked() {
+                                egui::Color32::LIGHT_BLUE
+                            } else {
+                                egui::Color32::GRAY
+                            },
+                        );
+                        painter.rect_stroke(
+                            rect,
+                            5.0, // Corner radius
+                            egui::Stroke::new(1.0, egui::Color32::BLACK),
+                        );
+
+                        /*
+                        let mut note_string = note.to_string();
+                        if ui
+                            .put(rect, egui::TextEdit::singleline(&mut note_string))
+                            .changed()
+                        {
+                            if let Ok(parsed_note) = note_string.parse::<u8>() {
+                                if parsed_note <= 127 {
+                                    note = parsed_note;
+                                }
+                            }
+                        }*/
+
+                        // Handle note-on and note-off
+                        if response.drag_started() {
+                            synth.note_on(note);
+                        }
+
+                        if response.drag_released()  {
+                            synth.note_off(note);
+                        }
+                    }
+                });
+            }
 
         }); 
 
@@ -224,16 +310,14 @@ impl eframe::App for SynthApp {
             {
      let mut notes = Vec::new();
     for event in &i.events {
-    match event {
-        egui::Event::Key{key, pressed, modifiers,..} => {
-            //println!("{:?} {:?} {} ", &key, pressed, self.key_map[ &]  );
-            {
-                let freq = self.key_map[&key];
-                notes.push((freq,pressed));
-            }
-        },
-        //egui::Event::Text(t) => { println!("Text = {:?}", t) }
-        _ => {}
+    if let egui::Event::Key{key, pressed, ..} = event {
+        //println!("{:?} {:?} {} ", &key, pressed, self.key_map[ &]  );
+        {
+            if self.key_map.contains_key(&key){
+            let freq = self.key_map[key];
+            notes.push((freq,pressed));
+        }
+        }
     }
     
 
@@ -243,7 +327,6 @@ impl eframe::App for SynthApp {
 
         for note in notes{
                     match note {
-
                         (freq,true) => synth.note_on(freq),
                         (freq,false)=> synth.note_off(freq),
                     }
