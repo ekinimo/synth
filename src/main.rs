@@ -30,7 +30,6 @@ struct Synth {
     release: f32,
     freq_attack: f32,
     freq_decay: f32,
-    freq_sustain: f32,
     freq_release: f32,
     freq_start_mult: f32,
     freq_peak_mult: f32,
@@ -62,7 +61,6 @@ struct Envelope {
 struct FrequencyEnvelope {
     attack: f32,
     decay: f32,
-    sustain: f32,
     release: f32,
     start_time: Option<Instant>,
     release_time: Option<Instant>,
@@ -76,7 +74,6 @@ impl FrequencyEnvelope {
     fn new(
         attack: f32,
         decay: f32,
-        sustain: f32,
         release: f32,
         start_freq: f32,
         peak_freq: f32,
@@ -85,7 +82,6 @@ impl FrequencyEnvelope {
         Self {
             attack,
             decay,
-            sustain,
             release,
             start_time: None,
             release_time: None,
@@ -243,7 +239,6 @@ impl Synth {
             release: 0.3,
             freq_attack: 0.1,
             freq_decay: 0.2,
-            freq_sustain: 0.5,
             freq_release: 0.3,
             freq_start_mult: 1.0,
             freq_peak_mult: 2.0,
@@ -275,7 +270,6 @@ impl Synth {
             frequency_envelope: FrequencyEnvelope::new(
                 self.freq_attack,
                 self.freq_decay,
-                self.freq_sustain,
                 self.freq_release,
                 frequency,
                 frequency * self.freq_peak_mult,
@@ -500,7 +494,7 @@ impl eframe::App for SynthApp {
                             synth.note_on(note);
                         }
 
-                        if response.drag_released() {
+                        if response.drag_stopped() {
                             synth.note_off(note);
                         }
                     }
