@@ -1,0 +1,24 @@
+C : C  D  E  F  G  A  B
+D : D  E  F# G  A  B  C#
+E : E  F# G# A  B  C# D# 
+F : F  G  A  A# C  D  E
+G : G  A  B  C  D  E  F#
+A : A  B  C# D  E  F# G#
+B : B  C# D# E  F# G# A# 
+
+
+
+
+
+c - b   : {   B     E     }
+
+c - d   : { A B   D E   G }
+
+c - e   : { A B     E     } 
+
+c - f   : { A   C D E F G }
+
+c - g   : { A B C D E   G }
+
+c - a   : { A B   D E     }
+ 
