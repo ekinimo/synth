@@ -6,6 +6,160 @@ use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+// Effect parameter structs
+#[derive(Clone)]
+struct DelayParameters {
+    buffer: Vec<f32>,
+    position: usize,
+    delay_time: f32,
+    feedback: f32,
+    mix: f32,
+}
+
+#[derive(Clone)]
+struct FilterParameters {
+    cutoff: f32,
+    resonance: f32,
+    mix: f32,
+    prev_input: f32,
+    prev_output: f32,
+}
+
+#[derive(Clone)]
+struct TremoloParameters {
+    rate: f32,
+    depth: f32,
+    mix: f32,
+    phase: f32,
+}
+
+// Main effect enum
+#[derive(Clone)]
+enum Effect {
+    Delay(DelayParameters),
+    Distortion { drive: f32, mix: f32 },
+    Filter(FilterParameters),
+    Tremolo(TremoloParameters),
+}
+
+impl Effect {
+    fn process(&mut self, sample: f32, sample_rate: f32) -> f32 {
+        match self {
+            Effect::Delay(params) => {
+                let delayed = params.buffer[params.position];
+                params.buffer[params.position] = sample + delayed * params.feedback;
+                params.position = (params.position + 1) % params.buffer.len();
+                sample * (1.0 - params.mix) + delayed * params.mix
+            },
+            Effect::Distortion { drive, mix } => {
+                let processed = (sample * *drive).tanh();
+                sample * (1.0 - *mix) + processed * *mix
+            },
+            Effect::Filter(params) => {
+                let normalized_cutoff = 2.0 * std::f32::consts::PI * params.cutoff / sample_rate;
+                let alpha = normalized_cutoff / (1.0 + normalized_cutoff);
+                
+                let processed = params.prev_output + alpha * (sample - params.prev_output);
+                params.prev_output = processed;
+                params.prev_input = sample;
+                
+                sample * (1.0 - params.mix) + processed * params.mix
+            },
+            Effect::Tremolo(params) => {
+                let modulation = (1.0 + (params.phase * 2.0 * std::f32::consts::PI).sin() * params.depth) * 0.5;
+                params.phase = (params.phase + params.rate / sample_rate) % 1.0;
+                
+                let processed = sample * modulation;
+                sample * (1.0 - params.mix) + processed * params.mix
+            },
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Effect::Delay(params) => {
+                params.buffer.fill(0.0);
+                params.position = 0;
+            },
+            Effect::Distortion { .. } => {},
+            Effect::Filter(params) => {
+                params.prev_input = 0.0;
+                params.prev_output = 0.0;
+            },
+            Effect::Tremolo(params) => {
+                params.phase = 0.0;
+            },
+        }
+    }
+}
+
+// Effect creation functions
+impl Effect {
+    fn new_delay(sample_rate: f32, delay_time: f32, feedback: f32, mix: f32) -> Self {
+        let buffer_size = (sample_rate * delay_time) as usize;
+        Effect::Delay(DelayParameters {
+            buffer: vec![0.0; buffer_size.max(1)],
+            position: 0,
+            delay_time,
+            feedback,
+            mix,
+        })
+    }
+
+    fn new_distortion(drive: f32, mix: f32) -> Self {
+        Effect::Distortion { drive, mix }
+    }
+
+    fn new_filter(cutoff: f32, resonance: f32, mix: f32) -> Self {
+        Effect::Filter(FilterParameters {
+            cutoff,
+            resonance,
+            mix,
+            prev_input: 0.0,
+            prev_output: 0.0,
+        })
+    }
+
+    fn new_tremolo(rate: f32, depth: f32, mix: f32) -> Self {
+        Effect::Tremolo(TremoloParameters {
+            rate,
+            depth,
+            mix,
+            phase: 0.0,
+        })
+    }
+}
+
+// Simplified effect stack
+struct EffectStack {
+    effects: Vec<Effect>,
+}
+
+impl EffectStack {
+    fn new() -> Self {
+        Self { effects: Vec::new() }
+    }
+
+    fn add_effect(&mut self, effect: Effect) {
+        self.effects.push(effect);
+    }
+
+    fn process(&mut self, sample: f32, sample_rate: f32) -> f32 {
+        let mut processed = sample;
+        for effect in self.effects.iter_mut() {
+            processed = effect.process(processed, sample_rate);
+        }
+        processed
+    }
+
+    fn reset(&mut self) {
+        for effect in self.effects.iter_mut() {
+            effect.reset();
+        }
+    }
+}
+
+
 #[derive(Clone, Copy, PartialEq)]
 enum Waveform {
     Sine,
@@ -36,6 +190,7 @@ struct Synth {
     freq_sustain_mult: f32,
     num_harmonics: usize,
     harmonic_weights: [f32; 16],
+    effects:EffectStack,
 }
 
 struct Voice {
@@ -250,6 +405,7 @@ impl Synth {
                 0.05, 0.04,
             ],
             num_harmonics: 8,
+            effects:EffectStack::new(),
         }
     }
 
@@ -303,7 +459,7 @@ impl Synth {
                     < voice.envelope.release
         });
 
-        if self.voices.is_empty() {
+        let ret = if self.voices.is_empty() {
             0.0
         } else {
             self.voices
@@ -311,7 +467,9 @@ impl Synth {
                 .map(|voice| voice.get_sample(self.sample_rate))
                 .sum::<f32>()
                 / self.voices.len() as f32
-        }
+        };
+
+            self.effects.process(ret,self.sample_rate)
     }
 }
 
@@ -353,7 +511,7 @@ impl SynthApp {
                 s.chars()
                     .map( move |x| egui::Key::from_name(&format!("{x}")).unwrap())
                     .enumerate()
-                    .map(move |(i, d)| (d, (i + cnt * 4) as u8))
+                    .map(move |(i, d)| (d, (i + cnt * 5) as u8))
             })
             .collect();
         Self {
@@ -428,10 +586,79 @@ impl eframe::App for SynthApp {
                         egui::Slider::new(&mut synth.freq_sustain_mult, 0.5..=3.0)
                             .text("Sustain Multiplier"),
                     );
-                    ui.add(egui::Slider::new(&mut synth.pitch_bend, 0.5..=2.0).text("Pitch Bend"));
                 });
             });
-            ui.heading("Keyboard-to-Note Mapping");
+
+            ui.add(egui::Slider::new(&mut synth.pitch_bend, 0.5..=2.0).text("Pitch Bend"));
+            ui.heading("Effects");
+            ui.horizontal(|ui| {
+                //let synth = synth.lock().unwrap();
+                if ui.button("Add Delay").clicked() {
+                    let sr = synth.sample_rate;
+                    synth.effects.add_effect(Effect::new_delay(
+                        sr,
+                        0.3, // delay time
+                        0.4, // feedback
+                        0.5, // mix
+                    ));
+                }
+                
+                if ui.button("Add Distortion").clicked() {
+                    synth.effects.add_effect(Effect::new_distortion(2.0, 0.5));
+                }
+                
+                if ui.button("Add Filter").clicked() {
+                    synth.effects.add_effect(Effect::new_filter(1000.0, 0.7, 0.5));
+                }
+                
+                if ui.button("Add Tremolo").clicked() {
+                    synth.effects.add_effect(Effect::new_tremolo(5.0, 0.5, 0.5));
+                }
+            });
+
+            if ui.button("Reset Effects").clicked() {
+                synth.effects = EffectStack::new();
+            }
+
+            let sample_rate = synth.sample_rate;
+            for (index, effect) in synth.effects.effects.iter_mut().enumerate() {
+                ui.group(|ui| {
+                    match effect {
+                        Effect::Delay(params) => {
+                            ui.label(format!("Delay {}", index + 1));
+                            ui.add(egui::Slider::new(&mut params.delay_time, 0.0..=2.0).text("Delay Time"));
+                            ui.add(egui::Slider::new(&mut params.feedback, 0.0..=0.95).text("Feedback"));
+                            ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
+
+                            // Update buffer size if delay time changes
+                            let new_size = (sample_rate * params.delay_time) as usize;
+                            if params.buffer.len() != new_size {
+                                params.buffer = vec![0.0; new_size.max(1)];
+                                params.position = 0;
+                            }
+                        }
+                        Effect::Distortion {  ref mut drive,ref mut  mix } => {
+                            ui.label(format!("Distortion {}", index + 1));
+                            ui.add(egui::Slider::new(drive, 1.0..=10.0).text("Drive"));
+                            ui.add(egui::Slider::new( mix, 0.0..=1.0).text("Mix"));
+                        }
+                        Effect::Filter(params) => {
+                            ui.label(format!("Filter {}", index + 1));
+                            ui.add(egui::Slider::new(&mut params.cutoff, 20.0..=20000.0).logarithmic(true).text("Cutoff"));
+                            ui.add(egui::Slider::new(&mut params.resonance, 0.0..=0.99).text("Resonance"));
+                            ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
+                        }
+                        Effect::Tremolo(params) => {
+                            ui.label(format!("Tremolo {}", index + 1));
+                            ui.add(egui::Slider::new(&mut params.rate, 0.1..=20.0).text("Rate"));
+                            ui.add(egui::Slider::new(&mut params.depth, 0.0..=1.0).text("Depth"));
+                            ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
+                        }
+                    }
+                });
+            }
+
+           ui.heading("Keyboard-to-Note Mapping");
             // Render keyboard rows with drag value for note adjustment
             let rows = ["`1234567890-=".chars().collect::<Vec<_>>(),
                 "qwertyuiop[]\\".chars().collect::<Vec<_>>(),
