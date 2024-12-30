@@ -6,7 +6,32 @@ use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-// Effect parameter structs
+#[derive(Clone)]
+struct ChorusParameters {
+    buffers: Vec<Vec<f32>>,
+    positions: Vec<usize>,
+    rates: Vec<f32>,
+    depths: Vec<f32>,
+    phases: Vec<f32>,
+    mix: f32,
+}
+
+#[derive(Clone)]
+struct ReverbParameters {
+    comb_filters: Vec<Vec<f32>>,
+    comb_positions: Vec<usize>,
+    allpass_filters: Vec<Vec<f32>>,
+    allpass_positions: Vec<usize>,
+    feedback: f32,
+    mix: f32,
+}
+
+#[derive(Clone)]
+struct RingModParameters {
+    frequency: f32,
+    phase: f32,
+    mix: f32,
+}
 #[derive(Clone)]
 struct DelayParameters {
     buffer: Vec<f32>,
@@ -40,6 +65,9 @@ enum Effect {
     Distortion { drive: f32, mix: f32 },
     Filter(FilterParameters),
     Tremolo(TremoloParameters),
+    Chorus(ChorusParameters),
+    Reverb(ReverbParameters),
+    RingMod(RingModParameters),
 }
 
 impl Effect {
@@ -72,6 +100,60 @@ impl Effect {
                 let processed = sample * modulation;
                 sample * (1.0 - params.mix) + processed * params.mix
             },
+
+            Effect::Chorus(params) => {
+                let mut output = 0.0;
+
+                for i in 0..params.buffers.len() {
+                    // Update LFO phase
+                    params.phases[i] = (params.phases[i] + params.rates[i] / sample_rate) % 1.0;
+
+                    // Calculate delay time with LFO modulation
+                    let mod_delay = (1.0 + (params.phases[i] * 2.0 * std::f32::consts::PI).sin() * params.depths[i]) * 0.5;
+                    let delay_samples = (mod_delay * (params.buffers[i].len() - 1) as f32) as usize;
+
+                    // Read from buffer
+                    let read_pos = (params.positions[i] + params.buffers[i].len() - delay_samples) % params.buffers[i].len();
+                    output += params.buffers[i][read_pos];
+
+                    // Write to buffer
+                    params.buffers[i][params.positions[i]] = sample;
+                    params.positions[i] = (params.positions[i] + 1) % params.buffers[i].len();
+                }
+
+                output /= params.buffers.len() as f32;
+                sample * (1.0 - params.mix) + output * params.mix
+            },
+            Effect::Reverb(params) => {
+                // Process comb filters in parallel
+                let mut comb_output = 0.0;
+                for i in 0..params.comb_filters.len() {
+                    let delayed = params.comb_filters[i][params.comb_positions[i]];
+                    comb_output += delayed;
+                    params.comb_filters[i][params.comb_positions[i]] = sample + delayed * params.feedback;
+                    params.comb_positions[i] = (params.comb_positions[i] + 1) % params.comb_filters[i].len();
+                }
+                comb_output /= params.comb_filters.len() as f32;
+
+                // Process allpass filters in series
+                let mut allpass_output = comb_output;
+                for i in 0..params.allpass_filters.len() {
+                    let delayed = params.allpass_filters[i][params.allpass_positions[i]];
+                    let input = allpass_output;
+                    allpass_output = delayed - input;
+                    params.allpass_filters[i][params.allpass_positions[i]] = input + delayed * 0.5;
+                    params.allpass_positions[i] = (params.allpass_positions[i] + 1) % params.allpass_filters[i].len();
+                }
+
+                sample * (1.0 - params.mix) + allpass_output * params.mix
+            },
+            Effect::RingMod(params) => {
+                let modulator = (params.phase * 2.0 * std::f32::consts::PI).sin();
+                params.phase = (params.phase + params.frequency / sample_rate) % 1.0;
+
+                let processed = sample * modulator;
+                sample * (1.0 - params.mix) + processed * params.mix
+            },
         }
     }
 
@@ -89,11 +171,31 @@ impl Effect {
             Effect::Tremolo(params) => {
                 params.phase = 0.0;
             },
+            Effect::Chorus(params) => {
+                for buffer in params.buffers.iter_mut() {
+                    buffer.fill(0.0);
+                }
+                params.positions.fill(0);
+                params.phases.fill(0.0);
+            },
+            Effect::Reverb(params) => {
+                for buffer in params.comb_filters.iter_mut() {
+                    buffer.fill(0.0);
+                }
+                for buffer in params.allpass_filters.iter_mut() {
+                    buffer.fill(0.0);
+                }
+                params.comb_positions.fill(0);
+                params.allpass_positions.fill(0);
+            },
+            Effect::RingMod(params) => {
+                params.phase = 0.0;
+            },
         }
     }
 }
 
-// Effect creation functions
+
 impl Effect {
     fn new_delay(sample_rate: f32, delay_time: f32, feedback: f32, mix: f32) -> Self {
         let buffer_size = (sample_rate * delay_time) as usize;
@@ -126,6 +228,78 @@ impl Effect {
             depth,
             mix,
             phase: 0.0,
+        })
+    }
+
+    fn new_chorus(sample_rate: f32, voices: usize, mix: f32) -> Self {
+        let max_delay_samples = (sample_rate * 0.030) as usize; // 30ms max delay
+        let mut buffers = Vec::new();
+        let mut positions = Vec::new();
+        let mut rates = Vec::new();
+        let mut depths = Vec::new();
+        let mut phases = Vec::new();
+
+        for i in 0..voices {
+            buffers.push(vec![0.0; max_delay_samples]);
+            positions.push(0);
+            // Slightly different rates for each voice
+            rates.push(0.5 + (i as f32 * 0.2));
+            depths.push(0.7);
+            phases.push(0.0);
+        }
+
+        Effect::Chorus(ChorusParameters {
+            buffers,
+            positions,
+            rates,
+            depths,
+            phases,
+            mix,
+        })
+    }
+
+    fn new_reverb(sample_rate: f32, room_size: f32, mix: f32) -> Self {
+        // Schroeder reverb implementation
+        let comb_delays = [
+            (0.0297 * room_size),
+            (0.0371 * room_size),
+            (0.0411 * room_size),
+            (0.0437 * room_size),
+        ];
+        let allpass_delays = [0.0050, 0.0017];
+
+        let mut comb_filters = Vec::new();
+        let mut comb_positions = Vec::new();
+        let mut allpass_filters = Vec::new();
+        let mut allpass_positions = Vec::new();
+
+        for delay in comb_delays.iter() {
+            let size = (sample_rate * delay) as usize;
+            comb_filters.push(vec![0.0; size]);
+            comb_positions.push(0);
+        }
+
+        for delay in allpass_delays.iter() {
+            let size = (sample_rate * delay) as usize;
+            allpass_filters.push(vec![0.0; size]);
+            allpass_positions.push(0);
+        }
+
+        Effect::Reverb(ReverbParameters {
+            comb_filters,
+            comb_positions,
+            allpass_filters,
+            allpass_positions,
+            feedback: 0.84,
+            mix,
+        })
+    }
+
+    fn new_ring_mod(frequency: f32, mix: f32) -> Self {
+        Effect::RingMod(RingModParameters {
+            frequency,
+            phase: 0.0,
+            mix,
         })
     }
 }
@@ -614,7 +788,28 @@ impl eframe::App for SynthApp {
                 if ui.button("Add Tremolo").clicked() {
                     synth.effects.add_effect(Effect::new_tremolo(5.0, 0.5, 0.5));
                 }
-            });
+                if ui.button("Add Chorus").clicked() {
+                    let sample_rate = synth.sample_rate;
+                    synth.effects.add_effect(Effect::new_chorus(
+                    sample_rate,
+                    3, // number of voices
+                    0.5, // mix
+                ));
+                }
+
+                if ui.button("Add Reverb").clicked() {
+                    let sample_rate = synth.sample_rate;
+                    synth.effects.add_effect(Effect::new_reverb(
+                    sample_rate,
+                    1.0, // room size
+                    0.5, // mix
+                    ));
+                    }
+
+                if ui.button("Add Ring Modulator").clicked() {
+                    synth.effects.add_effect(Effect::new_ring_mod(440.0, 0.5));
+                        }
+                });
 
             if ui.button("Reset Effects").clicked() {
                 synth.effects = EffectStack::new();
@@ -636,24 +831,46 @@ impl eframe::App for SynthApp {
                                 params.buffer = vec![0.0; new_size.max(1)];
                                 params.position = 0;
                             }
-                        }
+                        },
                         Effect::Distortion {  ref mut drive,ref mut  mix } => {
                             ui.label(format!("Distortion {}", index + 1));
                             ui.add(egui::Slider::new(drive, 1.0..=10.0).text("Drive"));
                             ui.add(egui::Slider::new( mix, 0.0..=1.0).text("Mix"));
-                        }
+                        },
                         Effect::Filter(params) => {
                             ui.label(format!("Filter {}", index + 1));
                             ui.add(egui::Slider::new(&mut params.cutoff, 20.0..=20000.0).logarithmic(true).text("Cutoff"));
                             ui.add(egui::Slider::new(&mut params.resonance, 0.0..=0.99).text("Resonance"));
                             ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
-                        }
+                        },
                         Effect::Tremolo(params) => {
                             ui.label(format!("Tremolo {}", index + 1));
                             ui.add(egui::Slider::new(&mut params.rate, 0.1..=20.0).text("Rate"));
                             ui.add(egui::Slider::new(&mut params.depth, 0.0..=1.0).text("Depth"));
                             ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
-                        }
+                        },
+                        Effect::Chorus(params) => {
+        ui.label(format!("Chorus {}", index + 1));
+        for i in 0..params.rates.len() {
+            ui.add(egui::Slider::new(&mut params.rates[i], 0.1..=5.0)
+                .text(format!("Voice {} Rate", i + 1)));
+            ui.add(egui::Slider::new(&mut params.depths[i], 0.0..=1.0)
+                .text(format!("Voice {} Depth", i + 1)));
+        }
+        ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
+    },
+    Effect::Reverb(params) => {
+        ui.label(format!("Reverb {}", index + 1));
+        ui.add(egui::Slider::new(&mut params.feedback, 0.0..=0.95).text("Feedback"));
+        ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
+    },
+    Effect::RingMod(params) => {
+        ui.label(format!("Ring Modulator {}", index + 1));
+        ui.add(egui::Slider::new(&mut params.frequency, 1.0..=2000.0)
+            .logarithmic(true)
+            .text("Frequency"));
+        ui.add(egui::Slider::new(&mut params.mix, 0.0..=1.0).text("Mix"));
+    },
                     }
                 });
             }
